@@ -294,17 +294,23 @@ class _CLI_wrapper:
 def create_ssh_fixture(name):
     @pytest.fixture(scope="session", name=f"{name}_ssh")
     def _ssh(request):
-        try:
-            ssh = _CLI_wrapper(f"ssh://{request.getfixturevalue(f'{name}_hostname')}")
-        except Exception as exc:
-            logging.error("Failed to create ssh fixture and log in")
-            raise exc
+        attempt = 1
+        while True:
+            try:
+                start = time.time()
+                ssh = _CLI_wrapper(f"ssh://{request.getfixturevalue(f'{name}_hostname')}")
+                break
+            except Exception:
+                end = time.time()
+                msg = "SSH fixture failed after: %s, attempt %s" % (end - start, attempt)
+                logging.error(msg)
+                traceback.print_exc()
+                if attempt == 3:
+                    pytest.exit("SSH fixture failure; terminating session")
+                attempt += 1
         if ssh.cli_flavor == "mos":
             ssh.sendcmd("enable")
-        # Disable pagination
-        ssh.sendcmd("terminal length 0")
         yield ssh
-
     return _ssh
 
 
