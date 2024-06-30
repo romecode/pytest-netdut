@@ -19,8 +19,6 @@ import re
 import pytest
 from packaging import version
 from .wrappers import CLI, xapi
-import time
-import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -110,36 +108,39 @@ def create_skipper_fixture(name):
             min_chg_num = None
 
             # Restrict SKUs
-            for marker in node.iter_markers():
-                if marker.name in {"mos", "eos"}:
-                    allowed_os.add(marker.name)
-                    min_chg_num = marker.kwargs.get("min_change_number", None)
-                    min_version = marker.kwargs.get("min_version", None)
+            try:
+                for marker in node.iter_markers():
+                    if marker.name in {"mos", "eos"}:
+                        allowed_os.add(marker.name)
+                        min_chg_num = marker.kwargs.get("min_change_number", None)
+                        min_version = marker.kwargs.get("min_version", None)
 
-                elif marker.name == "only_device_type":
-                    pattern = marker.args[0]
-                    sku = request.getfixturevalue(f"{name}_sku")
-                    if not re.search(pattern, sku):
-                        pytest.skip(f"Skipped on this SKU: {sku} (only runs on {pattern})")
+                    elif marker.name == "only_device_type":
+                        pattern = marker.args[0]
+                        sku = request.getfixturevalue(f"{name}_sku")
+                        if not re.search(pattern, sku):
+                            pytest.skip(f"Skipped on this SKU: {sku} (only runs on {pattern})")
 
-                elif marker.name == "skip_device_type":
-                    pattern = marker.args[0]
-                    sku = request.getfixturevalue(f"{name}_sku")
-                    if re.search(pattern, sku):
-                        pytest.skip(f"Skipped on this SKU: {sku}")
+                    elif marker.name == "skip_device_type":
+                        pattern = marker.args[0]
+                        sku = request.getfixturevalue(f"{name}_sku")
+                        if re.search(pattern, sku):
+                            pytest.skip(f"Skipped on this SKU: {sku}")
 
-            if allowed_os:
-                dut_ssh = request.getfixturevalue(f"{name}_ssh")
-                dut_os_version = request.getfixturevalue(f"{name}_os_version")
-                if dut_ssh.cli_flavor not in allowed_os:
-                    pytest.skip(f"Cannot run on platform {dut_ssh.cli_flavor}")
-                if min_version or min_chg_num:
-                    # matches the pattern X.XX.X.XX with digits only
-                    release, change_number = parse_version(dut_os_version)
-                    if min_chg_num:
-                        version_skipper(change_number, min_chg_num)
-                    else:
-                        version_skipper(release, min_version)
+                if allowed_os:
+                    dut_ssh = request.getfixturevalue(f"{name}_ssh")
+                    dut_os_version = request.getfixturevalue(f"{name}_os_version")
+                    if dut_ssh.cli_flavor not in allowed_os:
+                        pytest.skip(f"Cannot run on platform {dut_ssh.cli_flavor}")
+                    if min_version or min_chg_num:
+                        # matches the pattern X.XX.X.XX with digits only
+                        release, change_number = parse_version(dut_os_version)
+                        if min_chg_num:
+                            version_skipper(change_number, min_chg_num)
+                        else:
+                            version_skipper(release, min_version)
+            except pytest.FixtureLookupError:
+                logger.debug("Pytest fixture recursion caught.")
 
         return skipper
 
@@ -202,9 +203,24 @@ class _CLI_wrapper:
     _cli = None
 
     def __init__(self, *args, **kwargs):
+        self.lo
         self._reinit_args = args
         self._reinit_kwargs = kwargs
         self.close_and_re_init()
+
+    def retry(retries):
+        def decorator(fn):
+            @wraps(fn)
+            def wrapper(self, *args, **kwargs):
+                retries_ = retries
+                while retries_:
+                    try:
+                        return fn(self, *args, **kwargs)
+                    except Exception as e:
+                        retries_ -= 1
+                        logging.error("An error occurred in %s, retries left %d, %s", fn.__name__, retries_, e)
+            return wrapper
+        return decorator
 
     def close_and_re_init(self):
         if self._cli:
@@ -215,6 +231,7 @@ class _CLI_wrapper:
     def close(self, *args, **kwargs):
         return self._cli.close(*args, **kwargs)
 
+    @retry(retries=3)
     def login(self, *args, **kwargs):
         return self._cli.login(*args, **kwargs)
 
@@ -296,22 +313,14 @@ class _CLI_wrapper:
 def create_ssh_fixture(name):
     @pytest.fixture(scope="session", name=f"{name}_ssh")
     def _ssh(request):
-        attempt = 1
-        while True:
-            try:
-                start = time.time()
-                ssh = _CLI_wrapper(f"ssh://{request.getfixturevalue(f'{name}_hostname')}")
-                break
-            except Exception:
-                end = time.time()
-                msg = "SSH fixture failed after: %s, attempt %s" % (end - start, attempt)
-                logging.error(msg)
-                traceback.print_exc()
-                if attempt == 3:
-                    pytest.exit("SSH fixture failure; terminating session")
-                attempt += 1
+        ssh = _CLI_wrapper(f"ssh://{request.getfixturevalue(f'{name}_hostname')}")
         if ssh.cli_flavor == "mos":
-            ssh.sendcmd("enable")
+            # do not break the fixture if SSH failed
+            # pass the failure into the test
+            try:
+                ssh.sendcmd("enable")
+            except AttributeError:
+                pass
         yield ssh
     return _ssh
 
