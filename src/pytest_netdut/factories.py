@@ -220,7 +220,9 @@ class _CLI_wrapper:
                     except Exception as e:
                         retries_ -= 1
                         logging.error("An error occurred in %s, retries left %d, %s", fn.__name__, retries_, e)
+
             return wrapper
+
         return decorator
 
     def close_and_re_init(self):
@@ -232,7 +234,7 @@ class _CLI_wrapper:
     def close(self, *args, **kwargs):
         return self._cli.close(*args, **kwargs)
 
-    @retry(retries=3)
+    @retry(3)
     def login(self, *args, **kwargs):
         return self._cli.login(*args, **kwargs)
 
@@ -323,6 +325,7 @@ def create_ssh_fixture(name):
             except AttributeError:
                 pass
         yield ssh
+
     return _ssh
 
 
