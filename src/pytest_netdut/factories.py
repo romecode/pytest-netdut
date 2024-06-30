@@ -19,6 +19,7 @@ import re
 import pytest
 from packaging import version
 from .wrappers import CLI, xapi
+from functools import wraps
 
 logger = logging.getLogger(__name__)
 
