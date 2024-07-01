@@ -211,6 +211,7 @@ def retry(retries):
             while retries_:
                 try:
                     result = fn(*args, **kwargs)
+                    break
                 except Exception as e:
                     retries_ -= 1
                     logging.error(
@@ -219,6 +220,7 @@ def retry(retries):
                         retries_,
                         e,
                     )
+            return result
 
         return wrapper
 
