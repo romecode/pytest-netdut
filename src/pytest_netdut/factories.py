@@ -19,6 +19,7 @@ import re
 import pytest
 from packaging import version
 from .wrappers import CLI, xapi
+import traceback
 from functools import wraps
 
 logger = logging.getLogger(__name__)
@@ -27,8 +28,10 @@ logger = logging.getLogger(__name__)
 def create_dut_fixture(name):
     @pytest.fixture(name=f"{name}")
     def _dut(request):
+        print("HEY BIATCH IM HERE")
         skipper = request.getfixturevalue(f"{name}_skipper")
         skipper(request.node)
+        print("HEY BIATCH NOW HERE")
 
         class Dut:
             def __getattr__(self, attr):
@@ -199,37 +202,35 @@ def create_softened_fixture(name):
 
     return _softened
 
+def retry(retries):
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            retries_ = retries
+            while retries_:
+                try:
+                    return fn(*args, **kwargs)
+                except Exception as e:
+                    retries_ -= 1
+                    logging.error("An error occurred in %s: %s; retries left %d", fn.__name__, e, retries_)
+
+        return wrapper
+        
+    return decorator
 
 class _CLI_wrapper:
     _cli = None
 
     def __init__(self, *args, **kwargs):
-        self.lo
         self._reinit_args = args
         self._reinit_kwargs = kwargs
         self.close_and_re_init()
 
-    def retry(retries):
-        def decorator(fn):
-            @wraps(fn)
-            def wrapper(self, *args, **kwargs):
-                retries_ = retries
-                while retries_:
-                    try:
-                        return fn(self, *args, **kwargs)
-                    except Exception as e:
-                        retries_ -= 1
-                        logging.error("An error occurred in %s, retries left %d, %s", fn.__name__, retries_, e)
-
-            return wrapper
-
-        return decorator
-
     def close_and_re_init(self):
         if self._cli:
             del self._cli
-        self._cli = CLI(*self._reinit_args, **self._reinit_kwargs)
-        self.login()
+        self._cli = CLI(timeout=5, *self._reinit_args, **self._reinit_kwargs)
+        self.login(timeout=5)
 
     def close(self, *args, **kwargs):
         return self._cli.close(*args, **kwargs)
@@ -325,7 +326,6 @@ def create_ssh_fixture(name):
             except AttributeError:
                 pass
         yield ssh
-
     return _ssh
 
 
@@ -337,13 +337,12 @@ def create_console_fixture(name):
             # Ignore encoding errors for the console -- various conditions
             # cause non-UTF-8 characters to be received.
             console = _CLI_wrapper(console_url, ignore_encoding_errors=True)
-        except Exception as exc:
-            logging.error("Failed to create console fixture and log in")
-            raise exc
+        except Exception:
+            traceback.print_exc()
+            pytest.exit("Console fixture failure; terminating session")
         if console.cli_flavor == "mos":
             console.sendcmd("enable")
         yield console
-
     return _console
 
 
