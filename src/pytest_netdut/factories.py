@@ -1,5 +1,5 @@
 # -------------------------------------------------------------------------------
-# - Copyright (c) 2021 Arista Networks, Inc. All rights reserved.
+# - Copyright (c) 2021-2024 Arista Networks, Inc. All rights reserved.
 # -------------------------------------------------------------------------------
 # - Author:
 # -   fdk-support@arista.com
@@ -120,7 +120,9 @@ def create_skipper_fixture(name):
                         pattern = marker.args[0]
                         sku = request.getfixturevalue(f"{name}_sku")
                         if not re.search(pattern, sku):
-                            pytest.skip(f"Skipped on this SKU: {sku} (only runs on {pattern})")
+                            pytest.skip(
+                                f"Skipped on this SKU: {sku} (only runs on {pattern})"
+                            )
 
                     elif marker.name == "skip_device_type":
                         pattern = marker.args[0]
@@ -199,6 +201,7 @@ def create_softened_fixture(name):
 
     return _softened
 
+
 def retry(retries):
     def decorator(fn):
         @wraps(fn)
@@ -208,16 +211,19 @@ def retry(retries):
             while retries_:
                 try:
                     result = fn(*args, **kwargs)
-                    break
                 except Exception as e:
                     retries_ -= 1
-                    logging.error("An error occurred in %s, retries left %d: %s", fn.__name__, retries_, e)
-            return result
+                    logging.error(
+                        "An error occurred in %s, retries left %d: %s",
+                        fn.__name__,
+                        retries_,
+                        e,
+                    )
 
         return wrapper
-        
+
     return decorator
-    
+
 
 class _CLI_wrapper:
     _cli = None
