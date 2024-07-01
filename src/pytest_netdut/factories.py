@@ -19,7 +19,6 @@ import re
 import pytest
 from packaging import version
 from .wrappers import CLI, xapi
-import traceback
 from functools import wraps
 
 logger = logging.getLogger(__name__)
@@ -28,10 +27,8 @@ logger = logging.getLogger(__name__)
 def create_dut_fixture(name):
     @pytest.fixture(name=f"{name}")
     def _dut(request):
-        print("HEY BIATCH IM HERE")
         skipper = request.getfixturevalue(f"{name}_skipper")
         skipper(request.node)
-        print("HEY BIATCH NOW HERE")
 
         class Dut:
             def __getattr__(self, attr):
@@ -207,16 +204,20 @@ def retry(retries):
         @wraps(fn)
         def wrapper(*args, **kwargs):
             retries_ = retries
+            result = None
             while retries_:
                 try:
-                    return fn(*args, **kwargs)
+                    result = fn(*args, **kwargs)
+                    break
                 except Exception as e:
                     retries_ -= 1
-                    logging.error("An error occurred in %s: %s; retries left %d", fn.__name__, e, retries_)
+                    logging.error("An error occurred in %s, retries left %d: %s", fn.__name__, retries_, e)
+            return result
 
         return wrapper
         
     return decorator
+    
 
 class _CLI_wrapper:
     _cli = None
@@ -229,8 +230,8 @@ class _CLI_wrapper:
     def close_and_re_init(self):
         if self._cli:
             del self._cli
-        self._cli = CLI(timeout=5, *self._reinit_args, **self._reinit_kwargs)
-        self.login(timeout=5)
+        self._cli = CLI(*self._reinit_args, **self._reinit_kwargs)
+        self.login()
 
     def close(self, *args, **kwargs):
         return self._cli.close(*args, **kwargs)
@@ -326,6 +327,7 @@ def create_ssh_fixture(name):
             except AttributeError:
                 pass
         yield ssh
+
     return _ssh
 
 
@@ -337,12 +339,13 @@ def create_console_fixture(name):
             # Ignore encoding errors for the console -- various conditions
             # cause non-UTF-8 characters to be received.
             console = _CLI_wrapper(console_url, ignore_encoding_errors=True)
-        except Exception:
-            traceback.print_exc()
-            pytest.exit("Console fixture failure; terminating session")
+        except Exception as exc:
+            logging.error("Failed to create console fixture and log in")
+            raise exc
         if console.cli_flavor == "mos":
             console.sendcmd("enable")
         yield console
+
     return _console
 
 
