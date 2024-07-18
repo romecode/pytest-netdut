@@ -1,7 +1,7 @@
 # -------------------------------------------------------------------------------
 # - Copyright (c) 2021-2024 Arista Networks, Inc. All rights reserved.
 # -------------------------------------------------------------------------------
-# - Author:
+# - Maintainers:
 # -   fdk-support@arista.com
 # -
 # - Description:
@@ -14,6 +14,8 @@
 # -   license-bsd-3-clause
 # -
 # -------------------------------------------------------------------------------
+
+# pylint: disable=consider-using-f-string
 
 from __future__ import absolute_import, print_function
 
@@ -29,6 +31,8 @@ import six
 from pexpect import TIMEOUT, ExceptionPexpect
 from six.moves import range
 
+# setting encoding for python2 and python3 difference
+encoding = "utf-8" if six.text_type == str else None
 
 class spawn(pexpect.spawn):
     def __str__(self):
@@ -58,7 +62,9 @@ class Shell(spawn):
     def syncprompt(self):
         self.expect(self._prompt_regex)
         # Use captured serial number / hostname for finding the prompt
-        self._prompt = re.compile(self._control_code_re + self.match.group(1) + self._mode_and_path_re)
+        self._prompt = re.compile(
+            self._control_code_re + self.match.group(1) + self._mode_and_path_re
+        )
 
     def prompt(self, timeout=-1, reset=0):
         if reset:
@@ -68,8 +74,10 @@ class Shell(spawn):
         return self.before.replace("\r\n", "\n")
 
     def sendcmd(self, cmd="", timeout=-1, reset=0, wait=True):
-        if not isinstance(self.after, six.string_types) or not self._prompt.match(self.after):
-            raise RuntimeError(
+        if not isinstance(self.after, six.string_types) or not self._prompt.match(
+            self.after
+        ):
+            raise Exception(
                 "Cannot find prompt. Refusing to send command.",
                 self.after,
                 self._prompt.pattern,
@@ -96,20 +104,22 @@ class Shell(spawn):
         self.sendline(cmd)
 
         try:
-            self.expect(re.escape(cmd), timeout=10)
+            self.expect(re.escape(cmd), timeout=30)
         except TIMEOUT:
             # This deals with long commands on the serial console
-            if not cmd.startswith(
-                self.before[: self.before.index("\r")].strip()  # pylint: disable=unsubscriptable-object
-            ):
+            before = self.before
+            index = before.find("\r")
+            if index >= 0:
+                before = before[:index]
+            if not cmd.startswith(before.strip()):
                 raise
 
         # This deals with disappearing newlines on tty
         try:
-            self.expect("\r\n", timeout=10)
+            self.expect("\r\n", timeout=20)
         except TIMEOUT:
             self.sendline()
-            self.expect("\r\n", timeout=10)
+            self.expect("\r\n", timeout=30)
 
     # This deals with disappearing SIGINTs on tty
     def sendintr(self, retries=5, timeout=5, reset=0, wait=True):
@@ -140,27 +150,22 @@ class CLI(Shell):
         url,
         username="admin",
         password="",
-        timeout=30,
+        timeout=60,
         enable_cli_timeout=False,
         cli_flavor="mos",
-        ignore_encoding_errors=False,
-        ssh_debug_filename="/dev/null",
         extra_args=[],
     ):
         o = six.moves.urllib.parse.urlparse(url)  # pylint: disable=invalid-name
         self.cmd = o.scheme
-        self.ssh_debug_filename = ssh_debug_filename
         if self.cmd == "ssh":
             self.args = ["%s@%s" % (username, o.hostname)]
-            self.args += ["-vvv"]
-            self.args += [f"-E{ssh_debug_filename}"]
-            self.args += ["-o ConnectionAttempts 10"]
+            self.args += ["-o LogLevel ERROR"]
             self.args += ["-o StrictHostKeyChecking no"]
             self.args += ["-o UserKnownHostsFile /dev/null"]
             # default is whatever TCP timeout at OS level
             # self.args += ['-o ConnectTimeout 10']
             # self.args += ['-o ServerAliveCountMax 3']   # default 3
-            # self.args += ['-o ServerAliveInterval 30']  # default 0
+            self.args += ['-o ServerAliveInterval 60']  # default 0
             self.args += ["-p %s" % (o.port or "22")]
             self.args += extra_args
         elif self.cmd in ("tcp", "telnet"):
@@ -173,7 +178,7 @@ class CLI(Shell):
             conserver = o.netloc
             conport = o.path.strip("/")
             self.cmd = "console"
-            self.args = ["-f", "-M", conserver, "-e^^^^", conport]
+            self.args = ["-f", "-M", conserver, conport]
             self.args += extra_args
         else:
             self.args = [o.hostname, str(o.port)]
@@ -184,8 +189,8 @@ class CLI(Shell):
             self.args,
             timeout,
             dimensions=(60, 500),
-            encoding="utf-8" if six.text_type == str else None,
-            codec_errors="ignore" if ignore_encoding_errors else "strict",
+            encoding=encoding,
+            codec_errors='ignore'
         )
         self.logfile_read = sys.stdout
         self.delayafterterminate = 1
@@ -199,135 +204,86 @@ class CLI(Shell):
         self.plm_wd_supported = None
         self.serial = None
         self.micro_version = None
+        if self.cmd == "console":
+            print(" -- waiting for console connection at {} --".format(time.asctime()))
+            self.expect(r"Enter .* for help", timeout=30)
+            print(" -- console connected at {} --".format(time.asctime()))
 
-    def _login_prompt(self, timeout):
-        time0 = time.time()
-        i = 0
-        while True:
-            if time.time() - time0 > timeout:
-                raise TIMEOUT("failed to login")
-
-            index = self.expect(
-                [
-                    TIMEOUT,
-                    self.login_prompt_re_mos,
-                    self.login_prompt_re_eos,
-                    self.login_prompt_re_aboot,
-                ],
-                timeout=2,
-            )
-
-            print(" -- Got a login prompt index of {} -- ".format(index))
-
-            if index == 1:
-                self.cli_flavor = "mos"
-                break
-
-            if index == 2:
-                self.cli_flavor = "eos"
-                break
-
-            if index == 3:
-                self.cli_flavor = "aboot"
-                break
-
-            # Note that blindly sending EOFs and INTRs may break
-            # some of the init scripts if the device is rebooting.
-            if i % 2 == 0:
-                self.sendeof()
-            else:
-                pexpect.spawn.sendintr(self)
-
-            i += 1
-
-        if self.cli_flavor != "aboot":
-            self.sendline(self.username)
-            self.expect(self.username + "(\r)?\r\n", timeout=10)
-        else:
-            self.sendline()
-
-    def _login_setup_os(self, timeout):
-        # Sendcmd via Shell directly to avoid messing with cli_timeouts
-        # since we do not yet know for sure what OS the device is running.
-        show_version = self.sendcmd_simple("show version", timeout=10)
-        matcher = re.search("Serial number:[ \t]*(.*)", show_version)
-        if matcher:
-            self.serial = matcher.group(1)
-
-        matcher = re.search(r"System management controller version: (\d+)", show_version)
-        if matcher:
-            self.micro_version = matcher.group(1)
-
-        # More reliably determine the CLI flavor
-        # MOS does not have a 'Hardware version' field in "show version'
-        matcher = re.search("Hardware version:", show_version)
-        if matcher:
-            self.cli_flavor = "eos"
-        else:
-            self.cli_flavor = "mos"
-
-        # Check if previous tests left a password set
-        try:
-            self.sendcmd_simple("enable")
-        except TIMEOUT:
-            self.expect("Password:", timeout=10)
-            self.sendline("opensesame")  # This is used in some tests.
-            output = self.prompt(timeout=timeout, reset=1)
-            self.process_output(output)
-
-        self.sendcmd_simple("bash echo ===> px Determined the {} CLI flavor".format(self.cli_flavor))
-
-        if self.cli_flavor == "mos":
-            self.sendcmd_simple("set debug 1", timeout=10)
-
-            # Set default cli timeout which
-            # is the 2x the command timeout
-            if self.enable_cli_timeout:
-                self.set_cli_timeout()
-
-            # Determine device generation
-            try:
-                output = self.sendcmd("bash python -m hal property chassis chassis_gen")
-                self.device_generation = int(output.strip())
-            except Exception:  # pylint: disable=broad-except
-                plm_ver = self.sendcmd("bash i2cget -f -y 1 0x77 0x8 w").strip()
-                self.device_generation = 1 if int(plm_ver, 16) < 0x200 else 2
-
-            # If Gen2 device, determine PLM watchdog support by
-            # querying register PLM_VER_PATCH(0x7e)
-            try:
-                if self.device_generation == 2:
-                    plm_ver_patch = self.sendcmd("bash i2cget -f -y 1 0x77 0x7e b").strip()
-                    self.plm_wd_supported = plm_ver_patch != "0xdb"
-            except Exception:  # pylint: disable=broad-except
-                pass
-
-        self.sendcmd("show clock", timeout=timeout)
-
-    def login(self, timeout=30):  # noqa: MC0001
+    def login(self, timeout=60):  # noqa: MC0001
+        login_prompt_type = ['TIMEOUT', 'MOS', 'EOS', 'Aboot']
         if self.cmd != "ssh":
-            self._login_prompt(timeout)
+            time0 = time.time()
+            i = 0
+            while True:
+                if time.time() - time0 > timeout:
+                    raise TIMEOUT("failed to login")
 
-        print("\n -- Logged in. Sending password, etc. -- \n")
+                index = self.expect(
+                    [
+                        TIMEOUT,
+                        self.login_prompt_re_mos,
+                        self.login_prompt_re_eos,
+                        self.login_prompt_re_aboot,
+                    ],
+                    timeout=5,
+                )
+
+                print(" -- Got a login prompt index of {} ({}) at {} --"
+                      .format(index, login_prompt_type[index], time.asctime()))
+
+                if index == 1:
+                    self.cli_flavor = "mos"
+                    break
+
+                if index == 2:
+                    self.cli_flavor = "eos"
+                    break
+
+                if index == 3:
+                    self.cli_flavor = "aboot"
+                    break
+
+                # Note that blindly sending EOFs and INTRs may break
+                # some of the init scripts if the device is rebooting.
+                if i % 2 == 0:
+                    self.sendeof()
+                else:
+                    pexpect.spawn.sendintr(self)
+
+                i += 1
+
+            if self.cli_flavor != "aboot":
+                self.sendline(self.username)
+                self.expect(self.username + "(\r)?\r\n", timeout=10)
+            else:
+                self.sendline()
+
+        print("\n -- Logged in. Sending password, etc. at {} -- \n".format(time.asctime()))
 
         if self.cli_flavor != "aboot":
             # This should also handle the case where a password prompt is presented
             # because a TACACS server has been configured even though there is no
             # password actually configured for the user.
-            index = self.expect([TIMEOUT, "Last login:.*\r\n", "Password:", "Aboot#"], timeout=10)
+            index = self.expect(
+                [TIMEOUT, "Last login:.*\r\n", "Password:", "Aboot#"], timeout=10
+            )
             if index == 2:
                 self.sendline(self.password)
 
-        print("\n -- Waiting for prompt -- \n")
+        print("\n -- Waiting for prompt at {} -- \n".format(time.asctime()))
 
         try:
             self.prompt(reset=1)
         except TIMEOUT:
             # Check if the CLI is busted or if previous tests left a password set
             try:
-                index = self.expect(["Traceback", "Login incorrect", "Password:"], timeout=10)
+                index = self.expect(
+                    ["Traceback", "Login incorrect", "Password:"], timeout=10
+                )
                 if index == 0:
-                    raise RuntimeError("CLI is busted, try logging in as root!")  # pylint: disable=raise-missing-from
+                    raise Exception(  # pylint: disable=raise-missing-from
+                        "CLI is busted, try logging in as root!"
+                    )
                 if index == 1:
                     self.expect("login:", timeout=2)
                     self.sendline(self.username)
@@ -339,7 +295,9 @@ class CLI(Shell):
                     self.sendline("opensesame")  # This is used in some tests.
                     self.expect("Last login:.*\r\n", timeout=10)
                 self.expect("Traceback", timeout=10)
-                raise RuntimeError("CLI is busted, try logging in as root!")  # pylint: disable=raise-missing-from
+                raise Exception(  # pylint: disable=raise-missing-from
+                    "CLI is busted, try logging in as root!"
+                )
             except TIMEOUT:
                 self.prompt(reset=1)
 
@@ -351,7 +309,70 @@ class CLI(Shell):
 
         # Do standard setup for MOS/EOS.
         if self.cli_flavor != "aboot" and self.username != "root":
-            self._login_setup_os(timeout)
+            # Sendcmd via Shell directly to avoid messing with cli_timeouts
+            # since we do not yet know for sure what OS the device is running.
+            show_version = self.sendcmd_simple("show version", timeout=10)
+            matcher = re.search("Serial number:[ \t]*(.*)", show_version)
+            if matcher:
+                self.serial = matcher.group(1)
+
+            matcher = re.search(
+                r"System management controller version: (\d+)", show_version
+            )
+            if matcher:
+                self.micro_version = matcher.group(1)
+
+            # More reliably determine the CLI flavor
+            # MOS does not have a 'Hardware version' field in "show version'
+            matcher = re.search("Hardware version:", show_version)
+            if matcher:
+                self.cli_flavor = "eos"
+            else:
+                self.cli_flavor = "mos"
+
+            # Check if previous tests left a password set
+            try:
+                self.sendcmd_simple("enable")
+            except TIMEOUT:
+                self.expect("Password:", timeout=10)
+                self.sendline("opensesame")  # This is used in some tests.
+                output = self.prompt(timeout=timeout, reset=1)
+                self.process_output(output)
+
+            self.sendcmd_simple(
+                "bash echo ===> px Determined the {} CLI flavor".format(self.cli_flavor)
+            )
+
+            if self.cli_flavor == "mos":
+                self.sendcmd_simple("set debug 1", timeout=10)
+
+                # Set default cli timeout which
+                # is the 2x the command timeout
+                if self.enable_cli_timeout:
+                    self.set_cli_timeout()
+
+                # Determine device generation
+                try:
+                    output = self.sendcmd(
+                        "bash python -m hal property chassis chassis_gen"
+                    )
+                    self.device_generation = int(output.strip())
+                except Exception:  # pylint: disable=broad-except
+                    plm_ver = self.sendcmd("bash i2cget -f -y 1 0x77 0x8 w").strip()
+                    self.device_generation = 1 if int(plm_ver, 16) < 0x200 else 2
+
+                # If Gen2 device, determine PLM watchdog support by
+                # querying register PLM_VER_PATCH(0x7e)
+                try:
+                    if self.device_generation == 2:
+                        plm_ver_patch = self.sendcmd(
+                            "bash i2cget -f -y 1 0x77 0x7e b"
+                        ).strip()
+                        self.plm_wd_supported = plm_ver_patch != "0xdb"
+                except Exception:  # pylint: disable=broad-except
+                    pass
+
+            self.sendcmd("show clock", timeout=timeout)
 
         if self.cmd != "ssh":
             # EOS and Aboot wrap lines at 80 chars on the console by default
@@ -394,7 +415,7 @@ class CLI(Shell):
                 else:
                     self.sendcmd_simple("no timeout")
             else:
-                raise RuntimeError("Not at CLI prompt")
+                raise Exception("Not at CLI prompt")
 
     def sendcmd_simple(self, cmd="", timeout=-1, reset=0, wait=True):
         if wait:
@@ -476,7 +497,9 @@ class CLI(Shell):
 
 class FlakyTimeoutError(Exception):
     def __init__(self, cmd, timeout, actual_time):
-        super(FlakyTimeoutError, self).__init__(cmd, timeout, actual_time)  # pylint: disable=super-with-arguments
+        super(FlakyTimeoutError, self).__init__(  # pylint: disable=super-with-arguments
+            cmd, timeout, actual_time
+        )
         self.cmd = cmd
         self.timeout = timeout
         self.actual_time = actual_time
@@ -492,20 +515,26 @@ class FlakyTimeoutError(Exception):
 
 class CommandTimeoutError(FlakyTimeoutError):
     def __repr__(self):
-        return ("{}: " "command {!r} took longer than expected " "(actual time {!r}s, expected time {!r}s)").format(
-            self.__class__.__name__, self.cmd, self.actual_time, self.timeout
-        )
+        return (
+            "{}: "
+            "command {!r} took longer than expected "
+            "(actual time {!r}s, expected time {!r}s)"
+        ).format(self.__class__.__name__, self.cmd, self.actual_time, self.timeout)
 
 
 class PromptTimeoutError(FlakyTimeoutError):
     def __repr__(self):
-        return "{}: command {!r} didn't finish after {!r}s (expected time {!r}s)".format(
-            self.__class__.__name__, self.cmd, self.actual_time, self.timeout
+        return (
+            "{}: command {!r} didn't finish after {!r}s (expected time {!r}s)".format(
+                self.__class__.__name__, self.cmd, self.actual_time, self.timeout
+            )
         )
 
 
-def run(command, quiet=False, *args, **kwargs):  # pylint: disable=keyword-arg-before-vararg
-    output, status = pexpect.run(command, withexitstatus=1, *args, **kwargs)
+def run(  # pylint: disable=keyword-arg-before-vararg
+    command, quiet=False, *args, **kwargs
+):
+    output, status = pexpect.run(command, withexitstatus=1, encoding=encoding, *args, **kwargs)
     if status != 0:
         if not quiet:
             print(output)
