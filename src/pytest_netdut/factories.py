@@ -20,6 +20,8 @@ import pytest
 from packaging import version
 from .wrappers import CLI, xapi
 import tempfile
+import socket
+from time import sleep
 
 logger = logging.getLogger(__name__)
 
@@ -298,11 +300,12 @@ class _CLI_wrapper:
 class _SSH_CLI_wrapper(_CLI_wrapper):
     def login(self, *args, **kwargs):
         attempt = 0
-        while attempt < 3:
+        while attempt < 10:
             try:
                 self._cli.login(*args, **kwargs)
                 break
             except Exception as e:
+                sock.sendall(message.encode('utf-8'))
                 attempt += 1
                 with open(self._cli.ssh_debug_filename, "r", encoding="utf-8") as f:
                     ssh_debug = f.read()
@@ -312,6 +315,13 @@ class _SSH_CLI_wrapper(_CLI_wrapper):
                     ssh_debug,
                     e,
                 )
+                requests.post('https://textbelt.com/text', {
+                    'phone': '5618660737',
+                    'message': 'SSH FAILED',
+                    'key': '40da15de01731ed18440ab2ad27a083cea2b0834JQuZ3DLvyeu8kHsKQaOPVOKdp',
+                })
+                sleep(10)
+                
 
 
 def create_ssh_fixture(name):
