@@ -20,7 +20,7 @@ import pytest
 from packaging import version
 from .wrappers import CLI, xapi
 import tempfile
-import socket
+import requests
 from time import sleep
 
 logger = logging.getLogger(__name__)
