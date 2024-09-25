@@ -300,7 +300,7 @@ class _CLI_wrapper:
 class _SSH_CLI_wrapper(_CLI_wrapper):
     def login(self, *args, **kwargs):
         attempt = 0
-        while attempt < 10:
+        while attempt < 100:
             try:
                 self._cli.login(*args, **kwargs)
                 break
