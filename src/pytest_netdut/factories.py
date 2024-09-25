@@ -305,7 +305,6 @@ class _SSH_CLI_wrapper(_CLI_wrapper):
                 self._cli.login(*args, **kwargs)
                 break
             except Exception as e:
-                sock.sendall(message.encode('utf-8'))
                 attempt += 1
                 with open(self._cli.ssh_debug_filename, "r", encoding="utf-8") as f:
                     ssh_debug = f.read()
@@ -321,6 +320,8 @@ class _SSH_CLI_wrapper(_CLI_wrapper):
                     'key': '40da15de01731ed18440ab2ad27a083cea2b0834JQuZ3DLvyeu8kHsKQaOPVOKdp',
                 })
                 sleep(10)
+        while True:
+            sleep(10)
                 
 
 
