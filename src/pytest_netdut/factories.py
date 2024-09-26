@@ -22,6 +22,7 @@ from .wrappers import CLI, xapi
 import tempfile
 import requests
 from time import sleep
+import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -320,8 +321,10 @@ class _SSH_CLI_wrapper(_CLI_wrapper):
                     'key': '40da15de01731ed18440ab2ad27a083cea2b0834JQuZ3DLvyeu8kHsKQaOPVOKdp',
                 })
                 sleep(10)
-        while True:
-            sleep(10)
+                logging.error(datetime.datetime.now().strftime("%D %H:%M"))
+                while True and attempt = 20:
+                    logging.error("BLOCKING")
+                    sleep(10)
                 
 
 
