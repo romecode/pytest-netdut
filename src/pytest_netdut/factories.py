@@ -322,7 +322,7 @@ class _SSH_CLI_wrapper(_CLI_wrapper):
                 })
                 sleep(10)
                 logging.error(datetime.datetime.now().strftime("%D %H:%M"))
-                while True and attempt = 20:
+                while True and attempt == 20:
                     logging.error("BLOCKING")
                     sleep(10)
                 
